@@ -8,6 +8,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
+import os
+from dotenv import load_dotenv
+from fastapi import Request
+
+load_dotenv()
+
+# 1. Fetch it (Make sure this matches your .env file exactly!)
+MAPBOX_TOKEN = os.getenv("Mapbox_TOKEN") # Matches your .env exactly
 
 templates = Jinja2Templates(directory="templates")
 
@@ -30,7 +38,11 @@ def read_root():
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def read_dashboard(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    # 2. Use the SAME variable name here
+    return templates.TemplateResponse(
+        "index.html", 
+        {"request": request, "mapbox_token": MAPBOX_TOKEN} 
+    )
 
 @app.get("/simulation-results/{run_id}")
 def get_results(run_id: int, db: Session = Depends(get_db)):
