@@ -7,12 +7,19 @@ from .models import SimulationRun, AgentPosition
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
+from fastapi.middleware.cors import CORSMiddleware
 
 templates = Jinja2Templates(directory="templates")
 
-
-
 app = FastAPI(title="ABM Site Planning API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows the dashboard to talk to the API
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Automatically create tables in Postgres
 Base.metadata.create_all(bind=engine)
@@ -47,18 +54,17 @@ def run_simulation(
     height: int = 200, 
     db: Session = Depends(get_db)
 ):
-    # 1. Initialize the Mesa Model with the Dynamic Dimensions
-    # Ensure your SiteModel in model.py accepts width_meters/height_meters!
+    # 1. Initialize
     model = SiteModel(n_workers=n_workers, width_meters=width, height_meters=height)
     
-    # 2. Log the Run (using the custom width/height in the name)
+    # 2. Log the Run
     layout_desc = f"Site_{width}x{height}"
     new_run = SimulationRun(layout_name=layout_desc, agent_count=n_workers)
     db.add(new_run)
     db.commit()
     db.refresh(new_run)
-    
-    # 3. Run for 50 steps (let's give them more time to move!)
+
+    # 3. 🔥 THE MISSING STEP: Run the agents and save their paths!
     steps = 50
     for step in range(steps):
         model.step()
@@ -72,10 +78,12 @@ def run_simulation(
             )
             db.add(pos)
     
+    # 4. Finalize
     db.commit()
+
+    # 5. 🔥 THE MISSING RETURN: Send the data back to the Dashboard
     return {
-        "message": f"Simulation {new_run.id} complete", 
+        "message": "Simulation complete",
         "run_id": new_run.id,
-        "dimensions": f"{width}m x {height}m",
-        "steps_saved": steps
+        "total_steps": steps
     }
