@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Planning | Control Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+
+    <nav class="border-b border-gray-800 p-4 bg-gray-900 sticky top-0 z-50">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold tracking-tight">🏗️ ABM <span class="text-blue-500">Site Planning</span></h1>
+            <div class="space-x-4">
+                <span class="text-gray-400 text-sm">Target: Wood Wharf, London</span>
+                <button onclick="runSimulation()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">Run Simulation</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+        
+        <div class="lg:col-span-1 space-y-6">
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                <h2 class="text-lg font-semibold mb-4 text-blue-400">Site Configuration</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs uppercase text-gray-400 mb-1">Agent Count</label>
+                        <input id="n_workers" type="number" value="20" class="w-full bg-gray-700 border-none rounded p-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs uppercase text-gray-400 mb-1">Width (m)</label>
+                        <input id="width" type="number" value="300" class="w-full bg-gray-700 border-none rounded p-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs uppercase text-gray-400 mb-1">Height (m)</label>
+                        <input id="height" type="number" value="200" class="w-full bg-gray-700 border-none rounded p-2 text-white">
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                <h2 class="text-lg font-semibold mb-2 text-green-400">Briefing Summary</h2>
+                <p id="briefing" class="text-sm text-gray-400 italic">No simulation data yet. Run to generate intelligence.</p>
+            </div>
+        </div>
+
+        <div class="lg:col-span-3 bg-gray-800 rounded-xl border border-gray-700 overflow-hidden relative">
+            <div id="plot" class="w-full h-[600px]"></div>
+            <div id="loading" class="hidden absolute inset-0 bg-gray-900/80 flex items-center justify-center">
+                <p class="text-blue-400 animate-pulse font-bold">SIMULATING AGENTS...</p>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        async function runSimulation() {
+            const n = document.getElementById('n_workers').value;
+            const w = document.getElementById('width').value;
+            const h = document.getElementById('height').value;
+            const loader = document.getElementById('loading');
+            
+            loader.classList.remove('hidden');
+
+            try {
+                // 1. Run Simulation
+                const res = await fetch(`/run-simulation/?n_workers=${n}&width=${w}&height=${h}`, { method: 'POST' });
+                const simData = await res.json();
+                const runId = simData.run_id;
+
+                // 2. Get Results
+                const resData = await fetch(`/simulation-results/${runId}`);
+                const results = await resData.json();
+
+                // 3. Visualize using Plotly (placeholder for Mapbox)
+                const x = results.data.map(p => p.x);
+                const y = results.data.map(p => p.y);
+
+                Plotly.newPlot('plot', [{
+                    x: x, y: y, mode: 'markers',
+                    marker: { size: 6, color: '#3b82f6', opacity: 0.4 }
+                }], {
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    margin: { t: 40, b: 40, l: 40, r: 40 },
+                    xaxis: { color: '#9ca3af', gridcolor: '#374151', range: [0, w] },
+                    yaxis: { color: '#9ca3af', gridcolor: '#374151', range: [0, h] }
+                });
+
+                document.getElementById('briefing').innerHTML = 
+                    `<span class="text-white">Analysis Complete:</span> Run ${runId} processed ${results.total_points} movements across ${w}m of site area.`;
+
+            } catch (err) {
+                console.error(err);
+                alert("Simulation failed. Check console.");
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
