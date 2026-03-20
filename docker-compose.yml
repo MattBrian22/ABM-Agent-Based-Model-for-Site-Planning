@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # 1. The Database (Persistence)
+  db:
+    image: postgres:15
+    container_name: abm_postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=Aston2022
+      - POSTGRES_DB=abm_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. Redis (The High-Speed Memory for Subsumption)
+  redis:
+    image: redis:7-alpine
+    container_name: abm_redis
+    ports:
+      - "6379:6379"
+
+  # 3. The FastAPI Web App (The Engine)
+  web:
+    build: .
+    container_name: abm_web
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - .:/app
+    # This keeps the container running and allows for live code reloads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:

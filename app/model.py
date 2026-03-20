@@ -41,19 +41,19 @@ class UrbanModel(Model):
         return sunlight * 0.8 + agent.proximity_to_transit * 0.2
 class LabWorker(Agent):
     def step(self):
-        # 1. Calculate a potential move
-        dx = self.random.uniform(-5, 5)
-        dy = self.random.uniform(-5, 5)
-        new_pos = (self.pos[0] + dx, self.pos[1] + dy)
-
-        # 2. THE OBSTACLE: Let's define a building at x(120-180), y(80-120)
-        # Check if new_pos is inside the "Building"
-        if 120 <= new_pos[0] <= 180 and 80 <= new_pos[1] <= 120:
-            # COLLISION! The agent "bumps" into the wall and stays put
-            return 
+        # 1. Propose a move (Wander - Level 1)
+        new_x = self.pos[0] + self.random.uniform(-2, 2)
+        new_y = self.pos[1] + self.random.uniform(-2, 2)
         
-        # 3. Only move if the path is clear
-        # Also ensure they don't walk off the site boundaries
-        if (0 <= new_pos[0] <= self.model.space.width and 
-            0 <= new_pos[1] <= self.model.space.height):
-            self.model.space.move_agent(self, new_pos)
+        # 2. LEVEL 0: SENSE (Collision Detection)
+        # Example: Defining a skyscraper footprint between X: 140-160 and Y: 90-110
+        is_collision = (140 <= new_x <= 160) and (90 <= new_y <= 110)
+        
+        # 3. ACT (Subsumption)
+        if not is_collision:
+            # Move is clear, proceed with Wander
+            self.model.space.move_agent(self, (new_x, new_y))
+        else:
+            # Move is BLOCKED. Level 0 suppresses Level 1.
+            # The agent stays put or "bounces"
+            pass
