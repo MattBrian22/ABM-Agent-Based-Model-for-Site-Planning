@@ -59,43 +59,60 @@ def get_results(run_id: int, db: Session = Depends(get_db)):
         ]
     }
 
+# 1. Global State
+active_simulation = {"model": None}
+
 @app.post("/run-simulation/")
-def run_simulation(
-    n_workers: int, 
-    width: int = 300, 
-    height: int = 200, 
-    db: Session = Depends(get_db)
-):
-    # 1. Initialize
-    model = SiteModel(n_workers=n_workers, width_meters=width, height_meters=height)
-    
-    # 2. Log the Run
-    layout_desc = f"Site_{width}x{height}"
-    new_run = SimulationRun(layout_name=layout_desc, agent_count=n_workers)
-    db.add(new_run)
-    db.commit()
-    db.refresh(new_run)
+def run_simulation(n_workers: int, width: int = 300, height: int = 200, db: Session = Depends(get_db)):
+    try:
+        # 1. Initialize the Model (Ensure this name matches model.py exactly!)
+        # If you renamed it to WoodWharfModel, change it here!
+        model = SiteModel(n_workers=n_workers, width_meters=width, height_meters=height)
+        active_simulation["model"] = model
 
-    # 3. 🔥 THE MISSING STEP: Run the agents and save their paths!
-    steps = 50
-    for step in range(steps):
-        model.step()
-        for agent in model.schedule.agents:
-            pos = AgentPosition(
-                run_id=new_run.id,
-                step_number=step,
-                agent_id=agent.unique_id,
-                x=float(agent.pos[0]),
-                y=float(agent.pos[1])
-            )
-            db.add(pos)
-    
-    # 4. Finalize
-    db.commit()
+        # 2. Create the Run record
+        new_run = SimulationRun(layout_name=f"WoodWharf_{width}x{height}", agent_count=n_workers)
+        db.add(new_run)
+        db.commit()
+        db.refresh(new_run)
 
-    # 5. 🔥 THE MISSING RETURN: Send the data back to the Dashboard
+        # 3. Run and Collect Data in a List (Faster & Safer)
+        positions_to_save = []
+        for step in range(50):
+            model.step()
+            for agent in model.schedule.agents:
+                positions_to_save.append(
+                    AgentPosition(
+                        run_id=new_run.id,
+                        step_number=step,
+                        agent_id=agent.unique_id,
+                        x=float(agent.pos[0]),
+                        y=float(agent.pos[1])
+                    )
+                )
+        
+        # 4. Bulk Save (Prevents the "Internal Server Error" timeout)
+        db.bulk_save_objects(positions_to_save)
+        db.commit()
+
+        return {"status": "success", "run_id": new_run.id}
+
+    except Exception as e:
+        # This will print the REAL error in your Docker/Terminal console
+        print(f"CRITICAL ERROR: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
     return {
         "message": "Simulation complete",
         "run_id": new_run.id,
-        "total_steps": steps
+        "total_points": len(all_positions)
     }
+
+@app.post("/update_mode")
+async def update_mode(data: dict):
+    model = active_simulation.get("model")
+    if model:
+        model.mode = data['mode'] # This now affects the LIVE model
+        print(f"ALARM: Global Logic Shifted to {model.mode}")
+        return {"status": "success", "mode": model.mode}
+    return {"status": "error", "message": "No active model found"}

@@ -55,6 +55,20 @@
             </div>
         </div>
 
+        <div class="mt-4">
+    <label class="block text-sm font-medium text-gray-400">Strategy Mode</label>
+    <div class="flex items-center mt-2 space-x-4">
+        <button id="profit-btn" onclick="setMode('Profit')" 
+            class="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-lg border-2 border-blue-400">
+            PROFIT (ALPHA)
+        </button>
+        <button id="resilience-btn" onclick="setMode('Resilience')" 
+            class="px-4 py-2 text-xs font-bold text-gray-400 bg-gray-800 rounded-lg border-2 border-gray-700">
+            RESILIENCE (ESG)
+        </button>
+    </div>
+</div>
+
     </main>
 <script>
     // Jinja2 will replace {{ mapbox_token }} with the actual string from your .env
@@ -87,6 +101,32 @@ map.on('style.load', () => {
         }
     });
 });
+function setMode(newMode) {
+    fetch('/update_mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ mode: newMode })
+    })
+    .then(response => {
+        const profitBtn = document.getElementById('profit-btn');
+        const resilienceBtn = document.getElementById('resilience-btn');
+        
+        if (newMode === 'Profit') {
+            // High-Alpha Blue
+            profitBtn.className = "px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-lg border-2 border-blue-400 shadow-lg shadow-blue-500/20";
+            resilienceBtn.className = "px-4 py-2 text-xs font-bold text-gray-400 bg-gray-800 rounded-lg border-2 border-gray-700";
+        } else {
+            // ESG Green
+            resilienceBtn.className = "px-4 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg border-2 border-emerald-400 shadow-lg shadow-emerald-500/20";
+            profitBtn.className = "px-4 py-2 text-xs font-bold text-gray-400 bg-gray-800 rounded-lg border-2 border-gray-700";
+        }
+        console.log(`Simulation Mode switched to: ${newMode}`);
+    });
+}
+
+let simulationData = [];
+let currentStep = 0;
+let animationInterval;
 
 async function runSimulation() {
     const n = document.getElementById('n_workers').value;
@@ -97,59 +137,126 @@ async function runSimulation() {
     loader.classList.remove('hidden');
 
     try {
-        // 1. Trigger the Backend
-        const res = await fetch(`/run-simulation/?n_workers=${n}&width=${w}&height=${h}`, { method: 'POST' });
+        // Fix: Explicitly use URLSearchParams to ensure FastAPI reads them correctly
+        const params = new URLSearchParams({ n_workers: n, width: w, height: h });
+        const res = await fetch(`/run-simulation/?${params.toString()}`, { 
+            method: 'POST',
+            headers: { 'Accept': 'application/json' }
+        });
+        
         const simData = await res.json();
         
-        // 2. Fetch Results
+        // Wait 500ms to ensure Postgres has finished the bulk commit
+        await new Promise(r => setTimeout(r, 500));
+
         const resData = await fetch(`/simulation-results/${simData.run_id}`);
         const results = await resData.json();
 
-        // 3. Convert X,Y to Longitude/Latitude
-        // (Wood Wharf Anchor + small offset based on simulation meters)
-        const geojson = {
-            'type': 'FeatureCollection',
-            'features': results.data.map(p => ({
-                'type': 'Feature',
-                'geometry': {
-                    'type': 'Point',
-                    'coordinates': [
-                        -0.019 + (p.x / 111320), // Approx meter to degree conversion
-                        51.502 + (p.y / 111320)
-                    ]
-                }
-            }))
-        };
+        if (results.error) throw new Error(results.error);
 
-        // 4. Update the Map Layer
-        if (map.getSource('agents')) {
-            map.getSource('agents').setData(geojson);
-        } else {
-            map.addSource('agents', { type: 'geojson', data: geojson });
-            map.addLayer({
-                id: 'agent-layer',
-                type: 'circle',
-                source: 'agents',
-                paint: {
-                    'circle-radius': 4,
-                    'circle-color': '#3b82f6',
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#ffffff',
-                    'circle-opacity': 0.8
-                }
-            });
-        }
+        simulationData = results.data;
+        currentStep = 0;
 
-        document.getElementById('briefing').innerHTML = 
-            `<span class="text-white">Live Intelligence:</span> Successfully mapped ${results.total_points} agent movements onto the Wood Wharf Digital Twin.`;
+        if (animationInterval) clearInterval(animationInterval);
+        animationInterval = setInterval(renderAnimationFrame, 80); // Slightly faster for smoother motion
 
     } catch (err) {
-        console.error(err);
+        console.error("Visualizer Error:", err);
+        document.getElementById('briefing').innerHTML = `<span class="text-red-400">Error:</span> ${err.message}`;
     } finally {
         loader.classList.add('hidden');
     }
 }
-</script>
 
+function renderAnimationFrame() {
+    const frameData = simulationData.filter(p => p.step === currentStep);
+    
+    // Check if we hit the end of the simulation
+    if (frameData.length === 0) {
+        clearInterval(animationInterval);
+        document.getElementById('briefing').innerHTML = 
+            `<span class="text-green-400">Analysis Complete:</span> Generating Footfall Heatmap...`;
+        
+        // 🔥 NOW trigger the final heatmap using ALL data points
+        showHeatmap(simulationData); 
+        return;
+    }
+
+    // 1. Prepare GeoJSON for the CURRENT step only (for the moving dots)
+    const geojson = {
+        'type': 'FeatureCollection',
+        'features': frameData.map(p => ({
+            'type': 'Feature',
+            'geometry': {
+                'type': 'Point',
+                'coordinates': [-0.0192 + (p.x / 111320), 51.5015 + (p.y / 111320)]
+            }
+        }))
+    };
+
+    // 2. Update the "Moving Dots" Layer
+    if (map.getSource('agents')) {
+        map.getSource('agents').setData(geojson);
+    } else {
+        map.addSource('agents', { type: 'geojson', data: geojson });
+        map.addLayer({
+            id: 'agent-layer',
+            type: 'circle',
+            source: 'agents',
+            paint: {
+                'circle-radius': 5,
+                'circle-color': '#3b82f6',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#ffffff'
+            }
+        });
+    }
+
+    document.getElementById('briefing').innerHTML = `Visualizing Step: ${currentStep} / 50`;
+    currentStep++;
+}
+
+// Separate function for the static Heatmap
+function showHeatmap(allPoints) {
+    const geojson = {
+        'type': 'FeatureCollection',
+        'features': allPoints.map(p => ({
+            'type': 'Feature',
+            'geometry': {
+                'type': 'Point',
+                'coordinates': [-0.0192 + (p.x / 111320), 51.5015 + (p.y / 111320)]
+            }
+        }))
+    };
+
+    // Remove the moving dots layer so we can see the heatmap clearly
+    if (map.getLayer('agent-layer')) map.removeLayer('agent-layer');
+
+    if (map.getSource('heatmap-data')) {
+        map.getSource('heatmap-data').setData(geojson);
+    } else {
+        map.addSource('heatmap-data', { type: 'geojson', data: geojson });
+        map.addLayer({
+            id: 'agent-heat',
+            type: 'heatmap',
+            source: 'heatmap-data',
+            paint: {
+                'heatmap-intensity': 1,
+                'heatmap-color': [
+                    'interpolate', ['linear'], ['heatmap-density'],
+                    0, 'rgba(0, 0, 255, 0)',
+                    0.2, 'rgb(0, 255, 255)',
+                    0.4, 'rgb(0, 255, 0)',
+                    0.6, 'rgb(255, 255, 0)',
+                    1, 'rgb(255, 0, 0)'
+                ],
+                'heatmap-radius': 20,
+                'heatmap-opacity': 0.8
+            }
+        });
+    }
+    
+}
+</script>
 </body>
 </html>
